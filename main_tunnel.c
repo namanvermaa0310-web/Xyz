@@ -479,7 +479,10 @@ l2fwd_simple_crypto_enqueue(struct rte_mbuf *m,
 	 */
 	ipdata_offset = sizeof(struct rte_ether_hdr);
 
-	data_len = rte_pktmbuf_data_len(m) - ipdata_offset;
+	data_len = rte_pktmbuf_pkt_len(m) - ipdata_offset;
+
+	if (unlikely(rte_pktmbuf_pkt_len(m) < ipdata_offset))
+		return -1;
 
 	if ((cparams->do_hash || cparams->do_aead) && cparams->hash_verify)
 		data_len -= cparams->digest_length;
@@ -1268,10 +1271,33 @@ l2fwd_main_loop(struct l2fwd_crypto_options *options)
 								   pd + sizeof(struct rte_ether_hdr),
 								   IV_IN_PACKET_SIZE);
 
-						/* Strip IV: save ETH, adj, restore ETH */
+						/*
+						 * Strip IV cleanly using adj(ETH+IV) then prepend(ETH):
+						 *
+						 * WRONG approach (old):
+						 *   adj(16) moves data_off +16
+						 *   memcpy(mtod, eth, 14) writes 14B at new front
+						 *   → bytes 14-15 at new front still hold IV[14..15]
+						 *   → 2 leftover IV bytes corrupt the CAAM decrypt input
+						 *
+						 * CORRECT approach:
+						 *   adj(14+16=30) strips both ETH and IV in one shot
+						 *   prepend(14) carves fresh space from headroom
+						 *   memcpy writes clean ETH at the new front
+						 *   → byte 14 onward = pure encrypted inner IP, no IV remnant
+						 */
 						struct rte_ether_hdr eth_tmp;
 						rte_memcpy(&eth_tmp, pd, sizeof(struct rte_ether_hdr));
-						if (rte_pktmbuf_adj(m, IV_IN_PACKET_SIZE) == NULL) {
+
+						uint16_t strip_len = (uint16_t)(sizeof(struct rte_ether_hdr)
+						                                + IV_IN_PACKET_SIZE);
+						if (rte_pktmbuf_adj(m, strip_len) == NULL) {
+							rte_pktmbuf_free(m);
+							rte_crypto_op_free(ops_burst[j]);
+							continue;
+						}
+						/* Prepend fresh ETH-sized space from headroom */
+						if (rte_pktmbuf_prepend(m, sizeof(struct rte_ether_hdr)) == NULL) {
 							rte_pktmbuf_free(m);
 							rte_crypto_op_free(ops_burst[j]);
 							continue;
