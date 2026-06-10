@@ -126,10 +126,11 @@ cb_is_ctrl_frame(struct rte_mbuf *m)
 }
 
 /*
- * A control frame arrived on the WAN port carrying CB_CTRL_ETHERTYPE. The
- * payload after the Ethernet header is the original IPv4 frame keyd sent.
- * Restore the EtherType to IPv4 so the kernel stack on ctrl0 parses it, then
- * TX it to the virtio-user port (which delivers it to the kernel).
+ * A control frame arrived on the WAN port carrying CB_CTRL_ETHERTYPE. We
+ * preserved the ORIGINAL EtherType (ARP or IPv4) in a 2-byte tag inserted
+ * right after the Ethernet header on egress (see cb_pump_egress). Restore that
+ * EtherType, remove the 2-byte tag, then TX to the virtio-user port so the
+ * kernel stack on ctrl0 parses it correctly (ARP must stay ARP!).
  */
 void
 cb_punt_to_kernel(struct rte_mbuf *m)
@@ -139,9 +140,35 @@ cb_punt_to_kernel(struct rte_mbuf *m)
 		return;
 	}
 
-	struct rte_ether_hdr *eth =
-		rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
-	eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
+	const uint16_t ehlen = sizeof(struct rte_ether_hdr);
+
+	/* Need at least ETH + 2-byte original-type tag. */
+	if (unlikely(m->data_len < ehlen + 2)) {
+		rte_pktmbuf_free(m);
+		return;
+	}
+
+	/* Read the carried original EtherType (network order) from just after
+	 * the Ethernet header. */
+	uint8_t *p = rte_pktmbuf_mtod(m, uint8_t *);
+	uint16_t orig_type_be;
+	memcpy(&orig_type_be, p + ehlen, 2);
+
+	/* Save the Ethernet header, remove the 2-byte tag by sliding the header
+	 * forward 2 bytes (adj 2 from front then rebuild ETH is messy because the
+	 * tag sits AFTER the header; instead memmove the header over the tag). */
+	struct rte_ether_hdr eth_copy;
+	memcpy(&eth_copy, p, ehlen);
+	eth_copy.ether_type = orig_type_be;     /* restore real type */
+
+	/* Drop the 2 tag bytes: advance data start by 2, then place the saved
+	 * (restored) Ethernet header at the new front. */
+	if (unlikely(rte_pktmbuf_adj(m, 2) == NULL)) {
+		rte_pktmbuf_free(m);
+		return;
+	}
+	uint8_t *np = rte_pktmbuf_mtod(m, uint8_t *);
+	memcpy(np, &eth_copy, ehlen);
 
 	uint16_t sent = rte_eth_tx_burst(g_ctrl_pid, 0, &m, 1);
 	if (unlikely(sent != 1)) {
@@ -153,9 +180,14 @@ cb_punt_to_kernel(struct rte_mbuf *m)
 }
 
 /*
- * Pull frames the kernel/keyd transmitted on ctrl0 (they appear as RX on the
- * virtio-user port), stamp each with CB_CTRL_ETHERTYPE, and send them out the
- * WAN port so the peer box recognises and punts them to its own keyd.
+ * Pull frames the kernel/keyd transmitted on ctrl0 (RX on the virtio-user
+ * port). For each, PRESERVE the original EtherType (ARP/IPv4) by inserting a
+ * 2-byte tag right after the Ethernet header, then set the outer EtherType to
+ * CB_CTRL_ETHERTYPE so the peer's WAN classifier recognises it as control.
+ * TX out the WAN port.
+ *
+ * Wire layout produced:
+ *   [ETH dst|src|0x88B5][orig EtherType 2B][original L3 payload...]
  */
 int
 cb_pump_egress(void)
@@ -168,20 +200,38 @@ cb_pump_egress(void)
 	if (n == 0)
 		return 0;
 
+	const uint16_t ehlen = sizeof(struct rte_ether_hdr);
 	uint16_t i, out = 0;
 	struct rte_mbuf *txq[CB_BURST];
 
 	for (i = 0; i < n; i++) {
 		struct rte_mbuf *m = bufs[i];
-		if (unlikely(m->data_len < sizeof(struct rte_ether_hdr))) {
+		if (unlikely(m->data_len < ehlen)) {
 			rte_pktmbuf_free(m);
 			continue;
 		}
-		struct rte_ether_hdr *eth =
-			rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
-		/* Stamp the control EtherType so the peer's WAN RX classifier
-		 * recognises this as control, not data. */
+
+		/* Save the Ethernet header and its original EtherType. */
+		struct rte_ether_hdr eth_copy;
+		memcpy(&eth_copy, rte_pktmbuf_mtod(m, void *), ehlen);
+		uint16_t orig_type_be = eth_copy.ether_type;
+
+		/* Make room for a 2-byte tag between the ETH header and the L3
+		 * payload. Prepend 2 bytes at the front, then slide the Ethernet
+		 * header back to the front, leaving 2 free bytes after it. */
+		if (unlikely(rte_pktmbuf_prepend(m, 2) == NULL)) {
+			rte_pktmbuf_free(m);
+			continue;
+		}
+		uint8_t *p = rte_pktmbuf_mtod(m, uint8_t *);
+		/* Move the ETH header to the front (over the 2 new bytes). */
+		memcpy(p, &eth_copy, ehlen);
+		/* Write the original EtherType tag right after the header. */
+		memcpy(p + ehlen, &orig_type_be, 2);
+		/* Set the outer EtherType to the control type. */
+		struct rte_ether_hdr *eth = (struct rte_ether_hdr *)p;
 		eth->ether_type = rte_cpu_to_be_16(CB_CTRL_ETHERTYPE);
+
 		txq[out++] = m;
 	}
 
