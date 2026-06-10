@@ -53,6 +53,7 @@
 #include "crypto_session.h"  /* per-epoch DPDK session table */
 #include "key_listener.h"    /* receives keys from keyd over AF_UNIX */
 #include "keyd_proto.h"      /* KEYD_KEY_LEN, message format */
+#include "ctrl_bridge.h"     /* virtio-user control-plane exception path */
 /* <<< INTEGRATION <<< */
 
 enum cdev_type
@@ -1527,6 +1528,15 @@ l2fwd_main_loop(struct l2fwd_crypto_options *options)
 
 	l2fwd_crypto_options_print(options);
 
+	/* >>> INTEGRATION: does THIS lcore own the WAN port (port 1)? Only that
+	 * lcore services the virtio-user control port, to avoid two lcores racing
+	 * on the same queue. */
+	int this_lcore_has_wan = 0;
+	for (i = 0; i < qconf->nb_rx_ports; i++)
+		if (qconf->rx_port_list[i] == 1)
+			this_lcore_has_wan = 1;
+	/* <<< INTEGRATION <<< */
+
 	/*
 	 * Initialize previous tsc timestamp before the loop,
 	 * to avoid showing the port statistics immediately,
@@ -1537,6 +1547,13 @@ l2fwd_main_loop(struct l2fwd_crypto_options *options)
 	{
 
 		cur_tsc = rte_rdtsc();
+
+		/* >>> INTEGRATION: shuttle keyd control frames from the kernel
+		 * (virtio-user / ctrl0) out to the WAN wire. Cheap when idle; only
+		 * the WAN lcore does this. <<< */
+		if (this_lcore_has_wan)
+			cb_pump_egress();
+		/* <<< INTEGRATION <<< */
 
 		/*
 		 * Crypto device/TX burst queue drain
@@ -1686,6 +1703,18 @@ l2fwd_main_loop(struct l2fwd_crypto_options *options)
 						l2fwd_send_packet(m, l2fwd_dst_ports[portid]);
 						continue;
 					}
+
+					/* >>> INTEGRATION: control-plane classifier. On the WAN
+					 * port (port 1), frames stamped with the control EtherType
+					 * are keyd handshake traffic from the peer box — punt them
+					 * up to the kernel (ctrl0) instead of decrypting. Data
+					 * frames fall through to the normal decrypt path. <<< */
+					if (portid == 1 && cb_is_ctrl_frame(m)) {
+						rte_crypto_op_free(ops_burst[j]);
+						cb_punt_to_kernel(m);
+						continue;
+					}
+					/* <<< INTEGRATION <<< */
 
 					if (portid == 1) {
 						/*
@@ -3931,6 +3960,17 @@ int main(int argc, char **argv)
 	 *    arrive. keyd is the separate TLS daemon (see keyd.c / README). */
 	if (kl_init(NULL /*=default KEYD_SOCK_PATH*/) != 0)
 		rte_exit(EXIT_FAILURE, "key listener init failed\n");
+
+	/* 4. Initialise the control-plane bridge (virtio-user). This finds the
+	 *    virtio_user0 vdev port (from --vdev on the command line), sets it up,
+	 *    and bridges it to WAN port 1. If the vdev wasn't passed, cb_init
+	 *    returns <0 and we run WITHOUT the bridge — the data plane still works
+	 *    in bootstrap mode, but keyd has no path to the peer (no live rotation).
+	 *    The virtio-user port must NOT be in the -p portmask (keep it 0x3 for
+	 *    ports 0,1); the bridge owns that port exclusively. */
+	if (cb_init(1 /*WAN port*/, l2fwd_pktmbuf_pool) != 0)
+		printf("ctrl_bridge: not active (no --vdev?) — running bootstrap-only, "
+		       "keyd cannot reach peer until the vdev is provided\n");
 	/* <<< INTEGRATION <<< */
 
 	/* Initialize the port/cryptodev configuration of each logical core */
