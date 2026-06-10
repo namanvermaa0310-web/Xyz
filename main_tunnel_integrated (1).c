@@ -1709,6 +1709,11 @@ l2fwd_main_loop(struct l2fwd_crypto_options *options)
 					 * are keyd handshake traffic from the peer box — punt them
 					 * up to the kernel (ctrl0) instead of decrypting. Data
 					 * frames fall through to the normal decrypt path. <<< */
+					if (portid == 1) {
+						DBG(DBG_RX, "ctrl_bridge: WAN RX ethertype=0x%04x%s\n",
+						    rte_be_to_cpu_16(pkt_eth->ether_type),
+						    cb_is_ctrl_frame(m) ? " (CONTROL)" : "");
+					}
 					if (portid == 1 && cb_is_ctrl_frame(m)) {
 						rte_crypto_op_free(ops_burst[j]);
 						cb_punt_to_kernel(m);
