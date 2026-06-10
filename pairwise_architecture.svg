@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1020" font-family="'Courier New', monospace">
+  <defs>
+    <marker id="aCA" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#6a4a9c"/>
+    </marker>
+    <marker id="aData" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2e7d32"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="1020" fill="#f4f1ea"/>
+
+  <text x="600" y="40" text-anchor="middle" font-size="25" font-weight="bold" fill="#1a2e3b">Multi-Node Encryptor — PAIRWISE Key Architecture</text>
+  <text x="600" y="64" text-anchor="middle" font-size="14" fill="#5a6b78">Node-to-node confidentiality: each pair has its OWN key · C cannot read A↔B</text>
+
+  <!-- CA / server -->
+  <rect x="410" y="90" width="380" height="110" rx="10" fill="#efe7f7" stroke="#6a4a9c" stroke-width="3"/>
+  <text x="600" y="116" text-anchor="middle" font-size="17" font-weight="bold" fill="#6a4a9c">CENTRAL SERVER = CA / INTRODUCER</text>
+  <text x="600" y="140" text-anchor="middle" font-size="12" fill="#42305e">Issues each box a certificate (signed by internal CA)</text>
+  <text x="600" y="158" text-anchor="middle" font-size="12" fill="#42305e">Maintains membership · revokes removed boxes</text>
+  <text x="600" y="178" text-anchor="middle" font-size="12" font-weight="bold" fill="#8a2020">Does NOT hold traffic keys (only vouches for identity)</text>
+
+  <!-- enroll lines (purple, dashed = occasional) -->
+  <line x1="600" y1="200" x2="200" y2="300" stroke="#6a4a9c" stroke-width="1.8" stroke-dasharray="6,4" marker-end="url(#aCA)"/>
+  <line x1="600" y1="200" x2="600" y2="300" stroke="#6a4a9c" stroke-width="1.8" stroke-dasharray="6,4" marker-end="url(#aCA)"/>
+  <line x1="600" y1="200" x2="1000" y2="300" stroke="#6a4a9c" stroke-width="1.8" stroke-dasharray="6,4" marker-end="url(#aCA)"/>
+  <text x="600" y="225" text-anchor="middle" font-size="11" fill="#6a4a9c">enroll / get cert (occasional, mutual TLS) — dashed</text>
+
+  <!-- three boxes -->
+  <!-- A -->
+  <rect x="100" y="305" width="200" height="150" rx="10" fill="#e8eef2" stroke="#1a3c5e" stroke-width="2.5"/>
+  <text x="200" y="330" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a3c5e">BOX A</text>
+  <rect x="118" y="342" width="164" height="40" rx="5" fill="#fff3e0" stroke="#b5651d" stroke-width="1.8"/>
+  <text x="200" y="360" text-anchor="middle" font-size="11" font-weight="bold" fill="#b5651d">keyd (multi-peer)</text>
+  <text x="200" y="375" text-anchor="middle" font-size="9" fill="#5a3a18">TLS to each peer on demand</text>
+  <rect x="118" y="388" width="164" height="56" rx="5" fill="#dfeede" stroke="#2e7d32" stroke-width="1.8"/>
+  <text x="200" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#2e7d32">DPDK app</text>
+  <text x="200" y="420" text-anchor="middle" font-size="9" fill="#1f4f22">peer-keyed session table:</text>
+  <text x="200" y="434" text-anchor="middle" font-size="9" font-weight="bold" fill="#1f4f22">K_AB · K_AC</text>
+
+  <!-- B -->
+  <rect x="500" y="305" width="200" height="150" rx="10" fill="#e8eef2" stroke="#1a3c5e" stroke-width="2.5"/>
+  <text x="600" y="330" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a3c5e">BOX B</text>
+  <rect x="518" y="342" width="164" height="40" rx="5" fill="#fff3e0" stroke="#b5651d" stroke-width="1.8"/>
+  <text x="600" y="360" text-anchor="middle" font-size="11" font-weight="bold" fill="#b5651d">keyd (multi-peer)</text>
+  <text x="600" y="375" text-anchor="middle" font-size="9" fill="#5a3a18">TLS to each peer on demand</text>
+  <rect x="518" y="388" width="164" height="56" rx="5" fill="#dfeede" stroke="#2e7d32" stroke-width="1.8"/>
+  <text x="600" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#2e7d32">DPDK app</text>
+  <text x="600" y="420" text-anchor="middle" font-size="9" fill="#1f4f22">peer-keyed session table:</text>
+  <text x="600" y="434" text-anchor="middle" font-size="9" font-weight="bold" fill="#1f4f22">K_AB · K_BC</text>
+
+  <!-- C -->
+  <rect x="900" y="305" width="200" height="150" rx="10" fill="#e8eef2" stroke="#1a3c5e" stroke-width="2.5"/>
+  <text x="1000" y="330" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a3c5e">BOX C</text>
+  <rect x="918" y="342" width="164" height="40" rx="5" fill="#fff3e0" stroke="#b5651d" stroke-width="1.8"/>
+  <text x="1000" y="360" text-anchor="middle" font-size="11" font-weight="bold" fill="#b5651d">keyd (multi-peer)</text>
+  <text x="1000" y="375" text-anchor="middle" font-size="9" fill="#5a3a18">TLS to each peer on demand</text>
+  <rect x="918" y="388" width="164" height="56" rx="5" fill="#dfeede" stroke="#2e7d32" stroke-width="1.8"/>
+  <text x="1000" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#2e7d32">DPDK app</text>
+  <text x="1000" y="420" text-anchor="middle" font-size="9" fill="#1f4f22">peer-keyed session table:</text>
+  <text x="1000" y="434" text-anchor="middle" font-size="9" font-weight="bold" fill="#1f4f22">K_AC · K_BC</text>
+
+  <!-- pairwise key links (data plane) -->
+  <!-- A-B : K_AB -->
+  <line x1="300" y1="500" x2="500" y2="500" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#aData)"/>
+  <line x1="500" y1="515" x2="300" y2="515" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#aData)"/>
+  <rect x="350" y="478" width="100" height="22" rx="4" fill="#fff" stroke="#2e7d32"/>
+  <text x="400" y="494" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">K_AB</text>
+
+  <!-- B-C : K_BC -->
+  <line x1="700" y1="500" x2="900" y2="500" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#aData)"/>
+  <line x1="900" y1="515" x2="700" y2="515" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#aData)"/>
+  <rect x="750" y="478" width="100" height="22" rx="4" fill="#fff" stroke="#2e7d32"/>
+  <text x="800" y="494" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">K_BC</text>
+
+  <!-- A-C : K_AC (curved, below) -->
+  <path d="M 200 455 Q 600 600 1000 455" fill="none" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#aData)"/>
+  <rect x="550" y="556" width="100" height="22" rx="4" fill="#fff" stroke="#2e7d32"/>
+  <text x="600" y="572" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">K_AC</text>
+
+  <!-- isolation callout -->
+  <rect x="120" y="630" width="960" height="70" rx="10" fill="#fdeaea" stroke="#8a2020" stroke-width="2"/>
+  <text x="600" y="658" text-anchor="middle" font-size="15" font-weight="bold" fill="#8a2020">CONFIDENTIALITY BETWEEN NODES</text>
+  <text x="600" y="681" text-anchor="middle" font-size="12" fill="#6a1818">Box C holds only K_AC and K_BC. It does NOT hold K_AB → C cannot decrypt A↔B traffic. Each pair is private to its two endpoints.</text>
+
+  <!-- how receiver picks key -->
+  <rect x="120" y="715" width="960" height="95" rx="10" fill="#eef4f8" stroke="#1a3c5e" stroke-width="1.8"/>
+  <text x="140" y="740" font-size="14" font-weight="bold" fill="#1a3c5e">HOW THE RECEIVER PICKS THE RIGHT KEY</text>
+  <text x="140" y="763" font-size="12" fill="#2a3b48">1. Encrypted packet arrives → read the OUTER SOURCE ADDRESS (which box sent it).</text>
+  <text x="140" y="783" font-size="12" fill="#2a3b48">2. Look up that peer in the session table → get K_&lt;peer&gt;.  3. Read the epoch byte → pick current/previous version.</text>
+  <text x="140" y="803" font-size="12" fill="#2a3b48">4. Decrypt. (Same epoch + overlap mechanism as two-box, now indexed per peer.)</text>
+
+  <!-- legend / cost -->
+  <rect x="120" y="825" width="960" height="170" rx="10" fill="#ffffff" stroke="#9aa7b0" stroke-width="1.5"/>
+  <text x="140" y="850" font-size="14" font-weight="bold" fill="#1a2e3b">KEY POINTS &amp; THE TRADE-OFF</text>
+  <line x1="150" y1="868" x2="185" y2="868" stroke="#6a4a9c" stroke-width="2.5" stroke-dasharray="6,4" marker-end="url(#aCA)"/>
+  <text x="195" y="872" font-size="12" fill="#3a3a3a">Purple (dashed): box ⇄ CA — enrollment / certs only. CA never holds traffic keys.</text>
+  <line x1="150" y1="890" x2="185" y2="890" stroke="#2e7d32" stroke-width="2.5" marker-end="url(#aData)"/>
+  <text x="195" y="894" font-size="12" fill="#3a3a3a">Green: pairwise encrypted traffic, each pair on its OWN key (K_AB, K_AC, K_BC ...).</text>
+  <text x="150" y="920" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">keyd</tspan> negotiates a key directly with each peer (your two-box keyd, run per pair, on demand).</text>
+  <text x="150" y="941" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">Cost:</tspan> N×(N−1)/2 keys (20 boxes → up to 190 pairs). Intrinsic to node-to-node secrecy. Mitigate: only pair boxes that talk.</text>
+  <text x="150" y="962" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">Data plane unchanged</tspan> except the session table is now indexed by peer; control-plane load is higher (slow path, not per-packet).</text>
+  <text x="150" y="983" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">Model:</tspan> this is the IPsec / IKE approach — a unique Security Association per peer pair.</text>
+</svg>

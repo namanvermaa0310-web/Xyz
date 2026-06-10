@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1000" font-family="'Courier New', monospace">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#1a3c5e"/>
+    </marker>
+    <marker id="arrowKey" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#b5651d"/>
+    </marker>
+    <marker id="arrowData" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2e7d32"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="1000" fill="#f4f1ea"/>
+
+  <!-- Title -->
+  <text x="600" y="40" text-anchor="middle" font-size="26" font-weight="bold" fill="#1a2e3b">Multi-Node Encryptor Network — Group Key Architecture</text>
+  <text x="600" y="64" text-anchor="middle" font-size="14" fill="#5a6b78">15–20 DPDK encryptors · central Key Server · shared group key</text>
+
+  <!-- ============ KEY SERVER ============ -->
+  <rect x="430" y="95" width="340" height="120" rx="10" fill="#fff3e0" stroke="#b5651d" stroke-width="3"/>
+  <text x="600" y="122" text-anchor="middle" font-size="18" font-weight="bold" fill="#b5651d">KEY SERVER (KS)</text>
+  <text x="600" y="146" text-anchor="middle" font-size="12" fill="#5a3a18">• Member list + certificates (CA pinned)</text>
+  <text x="600" y="164" text-anchor="middle" font-size="12" fill="#5a3a18">• Generates group key (TEK) + generation/epoch</text>
+  <text x="600" y="182" text-anchor="middle" font-size="12" fill="#5a3a18">• Rotates on schedule, pushes to all members</text>
+  <text x="600" y="200" text-anchor="middle" font-size="12" fill="#5a3a18">• Evicts compromised box → immediate rekey</text>
+
+  <!-- KS standby -->
+  <rect x="790" y="115" width="120" height="80" rx="8" fill="#fff3e0" stroke="#b5651d" stroke-width="2" stroke-dasharray="5,4"/>
+  <text x="850" y="148" text-anchor="middle" font-size="13" font-weight="bold" fill="#b5651d">KS standby</text>
+  <text x="850" y="168" text-anchor="middle" font-size="11" fill="#5a3a18">(redundant,</text>
+  <text x="850" y="183" text-anchor="middle" font-size="11" fill="#5a3a18">failover)</text>
+  <line x1="770" y1="155" x2="788" y2="155" stroke="#b5651d" stroke-width="2" stroke-dasharray="4,3"/>
+
+  <!-- mutual TLS label -->
+  <text x="600" y="248" text-anchor="middle" font-size="13" font-weight="bold" fill="#b5651d">▼  mutual-TLS (cert auth) · group key + epoch pushed down  ▼</text>
+  <text x="600" y="266" text-anchor="middle" font-size="11" fill="#8a6a3a">over out-of-band management network (recommended)</text>
+
+  <!-- distribution lines from KS to boxes -->
+  <line x1="600" y1="215" x2="180" y2="320" stroke="#b5651d" stroke-width="2" marker-end="url(#arrowKey)"/>
+  <line x1="600" y1="215" x2="600" y2="320" stroke="#b5651d" stroke-width="2" marker-end="url(#arrowKey)"/>
+  <line x1="600" y1="215" x2="1020" y2="320" stroke="#b5651d" stroke-width="2" marker-end="url(#arrowKey)"/>
+
+  <!-- ============ BOX TEMPLATE x3 ============ -->
+  <!-- Box 1 -->
+  <g>
+    <rect x="60" y="325" width="240" height="250" rx="10" fill="#e8eef2" stroke="#1a3c5e" stroke-width="2.5"/>
+    <text x="180" y="350" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a3c5e">ENCRYPTOR BOX 1</text>
+
+    <!-- keyd -->
+    <rect x="80" y="362" width="200" height="46" rx="6" fill="#fff3e0" stroke="#b5651d" stroke-width="2"/>
+    <text x="180" y="382" text-anchor="middle" font-size="12" font-weight="bold" fill="#b5651d">keyd  (KS client)</text>
+    <text x="180" y="399" text-anchor="middle" font-size="10" fill="#5a3a18">TLS to KS → receives group key</text>
+
+    <!-- AF_UNIX arrow -->
+    <line x1="180" y1="408" x2="180" y2="424" stroke="#b5651d" stroke-width="2" marker-end="url(#arrowKey)"/>
+    <text x="232" y="420" font-size="9" fill="#8a6a3a">AF_UNIX</text>
+
+    <!-- DPDK app -->
+    <rect x="80" y="426" width="200" height="130" rx="6" fill="#dfeede" stroke="#2e7d32" stroke-width="2"/>
+    <text x="180" y="445" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">DPDK app (data plane)</text>
+    <text x="180" y="463" text-anchor="middle" font-size="10" fill="#1f4f22">key_listener → cs_rotate</text>
+    <text x="180" y="479" text-anchor="middle" font-size="10" fill="#1f4f22">per-epoch session table</text>
+    <line x1="95" y1="488" x2="265" y2="488" stroke="#2e7d32" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="180" y="504" text-anchor="middle" font-size="10" fill="#1f4f22">port0 ⇄ LAN (plaintext)</text>
+    <text x="180" y="520" text-anchor="middle" font-size="10" fill="#1f4f22">port1 ⇄ WAN (encrypted)</text>
+    <text x="180" y="540" text-anchor="middle" font-size="10" font-weight="bold" fill="#1f4f22">epoch byte tags key version</text>
+  </g>
+
+  <!-- Box 2 -->
+  <g>
+    <rect x="480" y="325" width="240" height="250" rx="10" fill="#e8eef2" stroke="#1a3c5e" stroke-width="2.5"/>
+    <text x="600" y="350" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a3c5e">ENCRYPTOR BOX 2</text>
+    <rect x="500" y="362" width="200" height="46" rx="6" fill="#fff3e0" stroke="#b5651d" stroke-width="2"/>
+    <text x="600" y="382" text-anchor="middle" font-size="12" font-weight="bold" fill="#b5651d">keyd  (KS client)</text>
+    <text x="600" y="399" text-anchor="middle" font-size="10" fill="#5a3a18">TLS to KS → receives group key</text>
+    <line x1="600" y1="408" x2="600" y2="424" stroke="#b5651d" stroke-width="2" marker-end="url(#arrowKey)"/>
+    <text x="652" y="420" font-size="9" fill="#8a6a3a">AF_UNIX</text>
+    <rect x="500" y="426" width="200" height="130" rx="6" fill="#dfeede" stroke="#2e7d32" stroke-width="2"/>
+    <text x="600" y="445" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">DPDK app (data plane)</text>
+    <text x="600" y="463" text-anchor="middle" font-size="10" fill="#1f4f22">key_listener → cs_rotate</text>
+    <text x="600" y="479" text-anchor="middle" font-size="10" fill="#1f4f22">per-epoch session table</text>
+    <line x1="515" y1="488" x2="685" y2="488" stroke="#2e7d32" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="600" y="504" text-anchor="middle" font-size="10" fill="#1f4f22">port0 ⇄ LAN (plaintext)</text>
+    <text x="600" y="520" text-anchor="middle" font-size="10" fill="#1f4f22">port1 ⇄ WAN (encrypted)</text>
+    <text x="600" y="540" text-anchor="middle" font-size="10" font-weight="bold" fill="#1f4f22">epoch byte tags key version</text>
+  </g>
+
+  <!-- Box N -->
+  <g>
+    <rect x="900" y="325" width="240" height="250" rx="10" fill="#e8eef2" stroke="#1a3c5e" stroke-width="2.5"/>
+    <text x="1020" y="350" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a3c5e">ENCRYPTOR BOX N</text>
+    <rect x="920" y="362" width="200" height="46" rx="6" fill="#fff3e0" stroke="#b5651d" stroke-width="2"/>
+    <text x="1020" y="382" text-anchor="middle" font-size="12" font-weight="bold" fill="#b5651d">keyd  (KS client)</text>
+    <text x="1020" y="399" text-anchor="middle" font-size="10" fill="#5a3a18">TLS to KS → receives group key</text>
+    <line x1="1020" y1="408" x2="1020" y2="424" stroke="#b5651d" stroke-width="2" marker-end="url(#arrowKey)"/>
+    <text x="1072" y="420" font-size="9" fill="#8a6a3a">AF_UNIX</text>
+    <rect x="920" y="426" width="200" height="130" rx="6" fill="#dfeede" stroke="#2e7d32" stroke-width="2"/>
+    <text x="1020" y="445" text-anchor="middle" font-size="12" font-weight="bold" fill="#2e7d32">DPDK app (data plane)</text>
+    <text x="1020" y="463" text-anchor="middle" font-size="10" fill="#1f4f22">key_listener → cs_rotate</text>
+    <text x="1020" y="479" text-anchor="middle" font-size="10" fill="#1f4f22">per-epoch session table</text>
+    <line x1="935" y1="488" x2="1105" y2="488" stroke="#2e7d32" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="1020" y="504" text-anchor="middle" font-size="10" fill="#1f4f22">port0 ⇄ LAN (plaintext)</text>
+    <text x="1020" y="520" text-anchor="middle" font-size="10" fill="#1f4f22">port1 ⇄ WAN (encrypted)</text>
+    <text x="1020" y="540" text-anchor="middle" font-size="10" font-weight="bold" fill="#1f4f22">epoch byte tags key version</text>
+  </g>
+
+  <!-- dots between box2 and boxN -->
+  <text x="810" y="455" text-anchor="middle" font-size="28" font-weight="bold" fill="#5a6b78">· · ·</text>
+
+  <!-- ============ ENCRYPTED DATA NETWORK ============ -->
+  <rect x="120" y="640" width="960" height="90" rx="12" fill="#eafaf0" stroke="#2e7d32" stroke-width="2.5"/>
+  <text x="600" y="668" text-anchor="middle" font-size="16" font-weight="bold" fill="#2e7d32">ENCRYPTED DATA NETWORK  (WAN / port 1 of every box)</text>
+  <text x="600" y="691" text-anchor="middle" font-size="12" fill="#1f4f22">Any box → any box. All traffic encrypted with the SAME current group key.</text>
+  <text x="600" y="711" text-anchor="middle" font-size="12" fill="#1f4f22">Receiver reads the epoch byte → selects matching group-key generation → decrypts.</text>
+
+  <!-- data plane lines from each box port1 to the data network -->
+  <line x1="180" y1="575" x2="180" y2="640" stroke="#2e7d32" stroke-width="2" marker-end="url(#arrowData)"/>
+  <line x1="600" y1="575" x2="600" y2="640" stroke="#2e7d32" stroke-width="2" marker-end="url(#arrowData)"/>
+  <line x1="1020" y1="575" x2="1020" y2="640" stroke="#2e7d32" stroke-width="2" marker-end="url(#arrowData)"/>
+  <!-- reverse heads -->
+  <line x1="200" y1="640" x2="200" y2="577" stroke="#2e7d32" stroke-width="2" marker-end="url(#arrowData)"/>
+  <line x1="620" y1="640" x2="620" y2="577" stroke="#2e7d32" stroke-width="2" marker-end="url(#arrowData)"/>
+  <line x1="1040" y1="640" x2="1040" y2="577" stroke="#2e7d32" stroke-width="2" marker-end="url(#arrowData)"/>
+
+  <!-- ============ LEGEND ============ -->
+  <rect x="120" y="760" width="960" height="180" rx="10" fill="#ffffff" stroke="#9aa7b0" stroke-width="1.5"/>
+  <text x="140" y="786" font-size="14" font-weight="bold" fill="#1a2e3b">LEGEND &amp; KEY POINTS</text>
+
+  <line x1="150" y1="805" x2="185" y2="805" stroke="#b5651d" stroke-width="3" marker-end="url(#arrowKey)"/>
+  <text x="195" y="809" font-size="12" fill="#3a3a3a">Control plane: keyd ⇄ Key Server (mutual TLS). Group key + epoch distributed down.</text>
+
+  <line x1="150" y1="828" x2="185" y2="828" stroke="#2e7d32" stroke-width="3" marker-end="url(#arrowData)"/>
+  <text x="195" y="832" font-size="12" fill="#3a3a3a">Data plane: encrypted traffic between boxes on the WAN. Unchanged from the two-box build.</text>
+
+  <text x="150" y="858" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">One group key</tspan> shared by all members → any-to-any without pairwise negotiation.</text>
+  <text x="150" y="879" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">KS rotates centrally</tspan>; epoch byte + overlap window make changeover seamless (existing mechanism).</text>
+  <text x="150" y="900" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">Adding a box = O(1):</tspan> it registers with the KS and pulls the key. No new pairwise links.</text>
+  <text x="150" y="921" font-size="12" fill="#3a3a3a">• <tspan font-weight="bold">Isolation:</tspan> need separate domains? Define multiple groups, one key per group.</text>
+</svg>

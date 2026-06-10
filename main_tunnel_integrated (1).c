@@ -347,6 +347,14 @@ struct l2fwd_keyrot_stats {
 static struct l2fwd_keyrot_stats keyrot_stats;
 /* <<< INTEGRATION <<< */
 
+/* >>> INTEGRATION: per-lcore pointer to THIS lcore's encrypt-side cs_port, set
+ * during per-port init. Used by l2fwd_simple_forward (which runs at dequeue
+ * time without cparams) to read the current encrypt epoch for stamping into
+ * the outgoing packet's TOS. Each lcore owns one port, so this is unambiguous
+ * for the one-lcore-per-port layout. */
+static RTE_DEFINE_PER_LCORE(struct cs_port *, g_enc_cs);
+/* <<< INTEGRATION <<< */
+
 /* A tsc-based timer responsible for triggering statistics printout */
 #define TIMER_MILLISECOND (rte_get_tsc_hz() / 1000)
 #define MAX_TIMER_PERIOD 86400UL /* 1 day max */
@@ -1154,7 +1162,12 @@ l2fwd_simple_forward(struct rte_mbuf *m, uint16_t portid,
 		 * operation is correct; multi-epoch rotation on the ENCRYPT direction
 		 * needs option (a) or (b). The DECRYPT direction is already correct
 		 * (epoch read from TOS in tunnel_decap). */
-		uint8_t enc_epoch = 0;   /* TODO(integration): see note above */
+		/* >>> INTEGRATION: stamp the CURRENT encrypt epoch into the outer-IP
+		 * TOS so the peer's decrypt path selects the matching key. The epoch
+		 * comes from this lcore's encrypt cs_port (set at init). If the pointer
+		 * isn't set (shouldn't happen on the encrypt lcore), fall back to 0. */
+		struct cs_port *encs = RTE_PER_LCORE(g_enc_cs);
+		uint8_t enc_epoch = encs ? encs->epoch_cur : 0;
 		if (tunnel_encap(m, dst_port, iv, enc_epoch) < 0)
 			return;
 		/* <<< INTEGRATION <<< */
@@ -1499,6 +1512,12 @@ l2fwd_main_loop(struct l2fwd_crypto_options *options)
 			/* Use the epoch-0 session as the active session too. */
 			port_cparams[i].session =
 				cs_session_current(&port_cparams[i].cs, NULL);
+
+			/* >>> INTEGRATION: if this is the encrypt port, record its cs_port
+			 * for l2fwd_simple_forward to read the current epoch at TX. */
+			if (port_cparams[i].is_encrypt)
+				RTE_PER_LCORE(g_enc_cs) = &port_cparams[i].cs;
+			/* <<< INTEGRATION <<< */
 		}
 		/* <<< INTEGRATION <<< */
 
