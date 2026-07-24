@@ -1,0 +1,31 @@
+============================================================
+ uipc_socket.c -- data-path drain (around line 943-950)
+============================================================
+
+REPLACE:
+
+        module1_add_data(&tp1->m1_state, top);
+        m_freem(top);
+        top = NULL;
+
+         if (tp1->m1_state.tlv_pending != NULL) {
+            tcp_usr_send(so2, tp1->m1_state.tlv_pending);
+            tp1->m1_state.tlv_pending = NULL;
+        }
+
+WITH:
+
+        module1_add_data(&tp1->m1_state, top);
+        m_freem(top);
+        top = NULL;
+
+        {
+            struct mbuf *pending = module1_take_pending(&tp1->m1_state);
+            if (pending != NULL)
+                tcp_usr_send(so2, pending);
+        }
+
+------------------------------------------------------------
+Requires: #include "module1.h" already present in uipc_socket.c
+(it should be, since module1_add_data is already called here).
+------------------------------------------------------------

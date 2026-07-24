@@ -1,0 +1,69 @@
+============================================================
+ app_thread.c -- timer-loop drain
+============================================================
+
+REPLACE the block:
+
+            if(!(timer1mscnt%(TIMER_RESOLUTION*1)))
+            {
+                int i;
+                for (i = 0; i < MAX_TCP_CONN; i++)
+                {
+                    if (TCP_lut[i].isStored != 1) continue;
+                    struct tcpcb *tp = TCP_lut[i].tp;
+                    if (tp == NULL) continue;
+                    if (tp->t_tcblut->lanif != LAN_IF_ID) continue;
+                    byte_caching_timer_check(&tp->m1_state);
+                    if (tp->m1_state.tlv_pending != NULL)
+                    {
+                        int32_t proxy_idx = tp->t_tcblut->index_proxy;
+                        if (proxy_idx >= 0 && TCP_lut[proxy_idx].tp != NULL)
+                        {
+                            struct socket *so2 = TCP_lut[proxy_idx].tp->sock;
+                            if (so2 != NULL)
+                                tcp_usr_send(so2, tp->m1_state.tlv_pending);
+                            else
+                                m_freem(tp->m1_state.tlv_pending);
+                        }
+                        else
+                        {
+                            m_freem(tp->m1_state.tlv_pending);
+                        }
+                        tp->m1_state.tlv_pending = NULL;
+                    }
+                }
+            }
+
+WITH:
+
+            if(!(timer1mscnt%(TIMER_RESOLUTION*1)))
+            {
+                int i;
+                for (i = 0; i < MAX_TCP_CONN; i++)
+                {
+                    if (TCP_lut[i].isStored != 1) continue;
+                    struct tcpcb *tp = TCP_lut[i].tp;
+                    if (tp == NULL) continue;
+                    if (tp->t_tcblut->lanif != LAN_IF_ID) continue;
+
+                    byte_caching_timer_check(&tp->m1_state);
+
+                    struct mbuf *pending = module1_take_pending(&tp->m1_state);
+                    if (pending != NULL)
+                    {
+                        int32_t proxy_idx = tp->t_tcblut->index_proxy;
+                        if (proxy_idx >= 0 && TCP_lut[proxy_idx].tp != NULL)
+                        {
+                            struct socket *so2 = TCP_lut[proxy_idx].tp->sock;
+                            if (so2 != NULL)
+                                tcp_usr_send(so2, pending);
+                            else
+                                m_freem(pending);
+                        }
+                        else
+                        {
+                            m_freem(pending);
+                        }
+                    }
+                }
+            }
