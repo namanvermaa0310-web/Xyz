@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant A as NA-A (encode)
+    participant B as NA-B (decode)
+    participant S as LAN Server
+
+    Note over A,S: Realistic case — B has MOST chunks,<br/>is missing only chunk2. Stream order<br/>required at S: 1, 2, 3, 4
+
+    A->>B: HIT(hash1)
+    Note over B: B HAS chunk1 → resolves instantly
+    B->>S: chunk1 ✓ (position 1, correct)
+
+    A->>B: HIT(hash2)
+    Note over B: B does NOT have chunk2 →<br/>cannot resolve. Fires NAK.<br/>⚠ but does NOT stop the stream
+    B-->>A: NAK(hash2)
+
+    A->>B: HIT(hash3)
+    Note over B: B HAS chunk3 → resolves instantly →<br/>forwards it NOW, even though chunk2<br/>hasn't gone yet
+    B->>S: chunk3 ✗ (arrives at position 2 — WRONG)
+
+    A->>B: HIT(hash4)
+    Note over B: B HAS chunk4 → forwards now
+    B->>S: chunk4 ✗ (arrives at position 3 — WRONG)
+
+    Note over A: NAK(hash2) arrives at A →<br/>A resends the real data
+    A->>B: MISS(chunk2 data)
+    Note over B: chunk2 finally resolves →<br/>forwarded LAST
+    B->>S: chunk2 ✗ (arrives at position 4 — WRONG)
+
+    Note over A,S: S received: 1, 3, 4, 2<br/>All bytes present, but chunk2 is<br/>out of place → FILE CORRUPTED.<br/>"one or two chunks not in correct place<br/>although it is there" — exactly this.

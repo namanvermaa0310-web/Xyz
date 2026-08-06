@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant A as NA-A (encode)
+    participant B as NA-B (decode + REORDER HOLD)
+    participant S as LAN Server
+
+    Note over A,S: THE FIX — B holds the stream at the gap<br/>until the missing chunk is filled
+
+    A->>B: HIT(hash1)
+    Note over B: resolves → queue: [1 ready]<br/>front is ready → forward
+    B->>S: chunk1 ✓
+
+    A->>B: HIT(hash2)
+    Note over B: cannot resolve → queue: [2 HOLE]<br/>fire NAK. front is a HOLE → STOP forwarding
+    B-->>A: NAK(hash2)
+
+    A->>B: HIT(hash3)
+    Note over B: resolves, BUT front is still a hole →<br/>queue: [2 HOLE][3 ready] — HOLD 3
+    A->>B: HIT(hash4)
+    Note over B: queue: [2 HOLE][3 ready][4 ready] — HOLD
+
+    A->>B: MISS(chunk2 data)
+    Note over B: fills the hole →<br/>queue: [2 ready][3 ready][4 ready]<br/>front now ready → DRAIN in order
+    B->>S: chunk2 ✓
+    B->>S: chunk3 ✓
+    B->>S: chunk4 ✓
+
+    Note over A,S: S received: 1, 2, 3, 4 — CORRECT.<br/>Cost: one round-trip stall while the<br/>hole is filled. Correctness restored.

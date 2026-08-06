@@ -1,0 +1,40 @@
+sequenceDiagram
+    participant C as LAN Client
+    participant A as NA-A (encode / warm store)
+    participant B as NA-B (decode / store WIPED)
+    participant S as LAN Server
+
+    Note over C,S: File = chunk1 chunk2 chunk3 chunk4 (must arrive in THIS order)
+
+    C->>A: send file (chunk1..chunk4)
+
+    Note over A: A has all chunks in its store,<br/>thinks B does too (NAK-only, no epoch)
+
+    A->>B: HIT(hash1)
+    A->>B: HIT(hash2)
+    A->>B: HIT(hash3)
+    A->>B: HIT(hash4)
+
+    Note over B: B's store was deleted →<br/>B cannot resolve ANY hash
+
+    B->>S: (nothing yet for chunk1 — can't resolve)
+    B-->>A: NAK(hash1)
+    B-->>A: NAK(hash2)
+    B-->>A: NAK(hash3)
+    B-->>A: NAK(hash4)
+
+    Note over A: A resends real data as MISS
+
+    A->>B: MISS(chunk1 data)
+    A->>B: MISS(chunk2 data)
+    A->>B: MISS(chunk3 data)
+    A->>B: MISS(chunk4 data)
+
+    Note over B: THE BUG: B forwards each chunk<br/>to S the instant it resolves it —<br/>in ARRIVAL order, not STREAM order
+
+    B->>S: chunk1
+    B->>S: chunk2
+    B->>S: chunk3
+    B->>S: chunk4
+
+    Note over C,S: In THIS clean case order happens to hold.<br/>The corruption appears when SOME chunks<br/>resolve immediately (HIT works) and only<br/>ONE OR TWO need the NAK round-trip →<br/>those arrive LATE and land out of place.
