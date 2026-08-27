@@ -1,39 +1,84 @@
-PicoRV32 Minimal SoC - "Hello World" on a RISC-V core in ModelSim
-=================================================================
-This is your STEP 1 milestone, pre-built and already verified:
-a RISC-V (RV32I) core executes a program and prints over a
-memory-mapped output port. No board and no RISC-V toolchain
-needed to run THIS - the program is already compiled (firmware.hex).
+================================================================
+ Ethernet RX -> TX Loopback   (Verilog-2001, 2 files)
+================================================================
 
-FILES
-  picorv32.v    - the RISC-V core (unmodified, from YosysHQ/picorv32)
-  tb_picosoc.v  - tiny SoC: core + 64KB RAM + print port + halt port
-  firmware.hex  - the compiled program (loaded into RAM at sim start)
-  run.do        - ModelSim script that compiles and runs everything
-  firmware.c / start.S / link.ld - the SOURCE of firmware.hex, for when
-                  you install the toolchain and start changing the program
+  eth_loopback.v      <- THE DESIGN (this is the only file you synthesize)
+  tb_eth_loopback.v   <- testbench (simulation only, not synthesized)
 
-HOW TO RUN (Windows + ModelSim)
-  1. Put all these files in one folder.
-  2. Open ModelSim.
-  3. File > Change Directory... > select that folder.
-  4. In the Transcript window at the bottom, type:   do run.do
-  5. You should see in the transcript:
-         Hello from PicoRV32!
-         [sim] HALT - firmware finished.
+Run:
+  iverilog -g2001 -o sim.out eth_loopback.v tb_eth_loopback.v
+  ./sim.out
 
-  That's a RISC-V core running a compiled C program on your machine.
+Result: ALL PHASES PASSED
+  Phase 1  clean loopback          50 in / 50 out / 0 errors
+  Phase 2  50% TX backpressure     30 in / 30 out / 0 errors
+  Phase 3  all frames flagged bad  20 dropped / 0 leaked through
 
-NOTE
-  A "Not enough words in the file" warning on firmware.hex is normal and
-  harmless - the program is just smaller than the 64KB RAM.
+----------------------------------------------------------------
+ WHY IT IS NOT JUST A WIRE
+----------------------------------------------------------------
+Conceptually yes, it is "RX in, TX out". But a direct wire does
+not work, for two reasons:
 
-MEMORY MAP (how the print works)
-  0x00000000..0x0000FFFF : RAM (program + data + stack)
-  0x10000000             : write a byte here -> printed as a character
-  0x10000004             : write here        -> ends the simulation
+1. RX has NO backpressure. TX HAS backpressure.
+   RX delivers data whether you are ready or not; TX can stall
+   you with tx_ready. A direct wire loses data on the first stall.
 
-NEXT STEP (later, not now)
-  Install a RISC-V GCC toolchain (xPack riscv-none-elf-gcc on Windows),
-  then you can edit firmware.c, recompile, and run real programs - building
-  up toward running ML-KEM software on this core.
+2. The MAC requires CONTIGUOUS transfer.
+   tx_valid must stay asserted from SOP through EOP with no gaps.
+   If TX stalls mid-packet on a direct wire, you emit a corrupt
+   frame.
+
+So the minimum that actually works is one packet FIFO doing
+store-and-forward: buffer a whole frame, then send it.
+
+----------------------------------------------------------------
+ THREE BUGS THIS CODE ALREADY HAS FIXED
+----------------------------------------------------------------
+All three were found by the testbench during development. They
+are the ones that bite people writing this from scratch:
+
+1. Multiple-driver on the packet counter.
+   A single pkt_count incremented by the RX block and decremented
+   by the TX block is illegal Verilog. Fixed by using two
+   counters (pkt_wr / pkt_rd) and comparing them.
+
+2. Mid-packet FIFO overflow writing a TRUNCATED frame.
+   Accept a packet at SOP when there is room, run out of room
+   part way through, skip the rest - and still commit it. Silent
+   corruption that only appears under load. Fixed by snapshotting
+   wr_ptr at SOP and rewinding if the frame cannot complete.
+
+3. Registered-output handshake violation.
+   Using tx_ready to decide to advance while the output beat only
+   appears the NEXT cycle means you can present a beat while
+   tx_ready is low and move on anyway - the MAC never sees it.
+   Fixed with a proper single-stage registered handshake:
+   a beat is consumed only when presented AND tx_ready is high.
+
+----------------------------------------------------------------
+ ASSUMPTION
+----------------------------------------------------------------
+RX and TX client clocks are the SAME clock. That is normal for a
+loopback (both come from the same IP instance). If they are
+genuinely separate clocks you need gray-coded CDC pointers on
+wr_ptr / rd_ptr - the store-and-forward structure stays the same.
+
+----------------------------------------------------------------
+ PORT NAMES
+----------------------------------------------------------------
+The port names here are generic. Bind them to your generated IP
+wrapper - generate the F-Tile Ethernet IP in Quartus, open the
+generated .v, and connect field by field. Do not assume the names
+in this file match your IP version.
+
+Also: the IP has a BUILT-IN design example generator that
+produces a complete working loopback with correct reset and
+initialisation sequencing. Generate and run that first.
+
+----------------------------------------------------------------
+ WHAT THIS DOES NOT VERIFY
+----------------------------------------------------------------
+Fabric logic only. NOT covered: PMA, PCS, RS-FEC, alignment
+marker lock, link training. Simulate the real IP, then test on
+hardware, before reporting that loopback works.
