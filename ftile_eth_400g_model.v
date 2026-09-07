@@ -81,11 +81,42 @@ module ftile_eth_400g_model #(
     input  wire                        i_clk_rx,
     input  wire                        rst_n,
 
-    // ---- model control (not on the real IP) ----
-    input  wire                        i_gen_enable,
-    input  wire [15:0]                 i_force_len,
-    input  wire                        i_inject_error,
-    input  wire [7:0]                  i_tx_stall_rate,   // 0 = never stall
+    //=====================================================================
+    // MODEL CONTROL - NONE OF THESE EXIST ON THE REAL IP
+    //
+    // These are testbench controls only. They disappear entirely when the
+    // licensed F-Tile Ethernet Hard IP is instantiated in place of this
+    // model. Do not look for them in UG 683023 - they are not there.
+    //=====================================================================
+    input  wire                        i_gen_enable,    // start/stop traffic
+    input  wire [15:0]                 i_force_len,     // frame size, bytes
+    input  wire                        i_inject_error,  // flag frames bad
+
+    // i_tx_stall_rate controls how often this model deasserts
+    // o_tx_mac_ready.  o_tx_mac_ready IS a real IP output (UG Table 43) and
+    // the pause protocol it drives IS documented (UG sec 7.4). But the RATE
+    // and PATTERN of stalling are NOT specified anywhere in the UG.
+    //
+    // This model uses an LFSR, which is an arbitrary stress pattern - useful
+    // for proving the datapath survives frequent stalls, but NOT a prediction
+    // of how the real IP behaves. The real pattern (periodic for FEC and
+    // alignment-marker insertion? bursty? rare?) must be observed from the
+    // generated design example or on hardware.
+    //
+    // 0 = never stall.  Higher = stalls more often.
+    input  wire [7:0]                  i_tx_stall_rate,
+
+    // i_gap_segs inserts N IDLE SEGMENTS between frames, producing beats
+    // where inframe has HOLES (e.g. 00ff, f0f0) instead of always ffff.
+    //
+    // Why this matters: UG sec 7.4 mandates tight packing for maximum TX
+    // throughput, but the RX waveform in the UG shows inframe[0] and
+    // inframe[1] toggling INDEPENDENTLY - so real RX beats can have gaps.
+    // Both are legal RX streams. A datapath must survive either.
+    //
+    // 0 = tight packing (inframe = ffff), the max-throughput case.
+    // 1..7 = idle segments between frames, the gapped case.
+    input  wire [2:0]                  i_gap_segs,
 
     // ================= RX MAC segmented client (IP -> user) =============
     // UG Table 46. "The interface does not take direct backpressure."
@@ -107,10 +138,13 @@ module ftile_eth_400g_model #(
     input  wire [NUM_SEG-1:0]          i_tx_mac_skip_crc,
     output reg                         o_tx_mac_ready,
 
-    // ---- model observation (not on the real IP) ----
-    output reg  [31:0]                 o_model_rx_frames,
-    output reg  [31:0]                 o_model_tx_frames,
-    output reg  [31:0]                 o_model_proto_viol
+    //=====================================================================
+    // MODEL OBSERVATION - NONE OF THESE EXIST ON THE REAL IP EITHER
+    //=====================================================================
+    output reg  [31:0]                 o_model_rx_frames,   // frames generated
+    output reg  [31:0]                 o_model_tx_frames,   // (see note in body)
+    output reg  [31:0]                 o_model_proto_viol,  // TX protocol errors
+    output reg  [31:0]                 o_model_bad_frames   // frames flagged bad
 );
 
     //=====================================================================
@@ -153,7 +187,9 @@ module ftile_eth_400g_model #(
 
     integer s, b;
     integer frames_this_beat;   // blocking accumulator - see note below
+    integer bad_this_beat;
     reg [15:0] nlen;
+    reg [2:0]  gap_cnt;         // idle segments still to insert
     reg [DATA_W-1:0]          nx_data;
     reg [NUM_SEG-1:0]         nx_inframe;
     reg [NUM_SEG*EMPTY_W-1:0] nx_empty;
@@ -173,10 +209,13 @@ module ftile_eth_400g_model #(
             rx_len               <= MIN_LEN;
             rx_off               <= 0;
             rx_active            <= 1'b0;
+            gap_cnt              <= 3'd0;
             o_model_rx_frames    <= 0;
+            o_model_bad_frames   <= 0;
         end else if (i_gen_enable || rx_active) begin
 
             frames_this_beat = 0;
+            bad_this_beat    = 0;
             nx_data    = 0;
             nx_inframe = 0;
             nx_empty   = 0;
@@ -185,6 +224,13 @@ module ftile_eth_400g_model #(
 
             // Build one beat, packing frames back to back with NO gap.
             for (s = 0; s < NUM_SEG; s = s + 1) begin
+
+              if (gap_cnt != 3'd0) begin
+                // Idle segment: inframe stays 0 here, leaving a HOLE in the
+                // beat. This is the loosely-packed case from the UG RX
+                // waveform.
+                gap_cnt = gap_cnt - 3'd1;
+              end else begin
 
                 if (!rx_active) begin
                     if (i_gen_enable) begin
@@ -209,18 +255,24 @@ module ftile_eth_400g_model #(
                         // EOP in this segment
                         nx_empty[s*EMPTY_W +: EMPTY_W] =
                             (SEG_B - (rx_len - rx_off));
-                        if (i_inject_error) begin
-                            nx_fcs[s]            = 1'b1;
-                            nx_err[s*2 +: 2]     = 2'd1;   // malformed
+                        // Error a FRACTION of frames, not all of them. An
+                        // all-bad stream cannot show that good frames survive
+                        // the drop stage, which is the thing worth proving.
+                        if (i_inject_error && (lfsr[3:0] < 4'd4)) begin
+                            nx_fcs[s]        = 1'b1;
+                            nx_err[s*2 +: 2] = 2'd1;   // malformed
+                            bad_this_beat    = bad_this_beat + 1;
                         end
                         rx_seq           = rx_seq + 1'b1;
                         frames_this_beat = frames_this_beat + 1;
                         rx_active          = 1'b0;   // next segment may start
                         rx_off             = 0;      // a NEW frame immediately
+                        gap_cnt            = i_gap_segs;
                     end else begin
                         rx_off = rx_off + SEG_B;
                     end
                 end
+              end
             end
 
             o_rx_mac_data        <= nx_data;
@@ -231,11 +283,13 @@ module ftile_eth_400g_model #(
             o_rx_mac_status_data <= 0;
             o_rx_mac_valid       <= (|nx_inframe);
             o_model_rx_frames    <= o_model_rx_frames + frames_this_beat;
+            o_model_bad_frames   <= o_model_bad_frames + bad_this_beat;
 
             rx_seq    <= rx_seq;
             rx_len    <= rx_len;
             rx_off    <= rx_off;
             rx_active <= rx_active;
+            gap_cnt   <= gap_cnt;
 
         end else begin
             o_rx_mac_valid   <= 1'b0;
@@ -245,6 +299,11 @@ module ftile_eth_400g_model #(
 
     //=====================================================================
     // TX READY GENERATOR
+    //
+    // Drives o_tx_mac_ready, which IS a real IP output. The stall PATTERN
+    // below is invented - the UG does not specify when or how often the real
+    // IP deasserts ready. Treat STALL_RATE as a stress knob, not a model of
+    // reality.
     //=====================================================================
     reg [7:0] stall_lfsr;
     always @(posedge i_clk_tx or negedge rst_n) begin

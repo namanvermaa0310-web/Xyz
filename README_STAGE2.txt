@@ -1,42 +1,13 @@
 ================================================================================
  STAGE 2 - 400G LOOPBACK DATAPATH
+ Agilex 7 F-Tile Ethernet Hard IP, MAC segmented client interface
 ================================================================================
 
 FILES
-  ftile_eth_400g_model.v   from STAGE 1, unchanged
-  eth400g_loopback.v       <-- STAGE 2, the design under test
+  ftile_eth_400g_model.v   from STAGE 1
+  eth400g_loopback.v       <-- STAGE 2, the design
   tb_loopback.v            testbench
   WAVEFORM_VERIFICATION_STAGE2.md
-
-SETTING THE FRAME SIZE
-  Open tb_loopback.v. Near the top there is ONE place to change:
-
-      localparam FRAME_LEN  = 64;      // <-- CHANGE THIS
-      localparam STALL_RATE = 0;       // 0 = never stall, 40 = stalls often
-      localparam RUN_CYCLES = 20000;
-      localparam INJECT_ERR = 0;       // 1 = flag every frame as bad
-
-  EVERY frame in the run will be exactly FRAME_LEN bytes. No mixed sizes.
-
-  A beat is 128 bytes (16 segments x 8 bytes), so:
-
-      frames per beat = 128 / FRAME_LEN
-
-  FRAME_LEN   segments/frame   frames/beat   eop_empty
-  ---------   --------------   -----------   ---------
-      64             8            2.000       0   (multiple of 8)
-     128            16            1.000       0
-     256            32            0.500       0
-    1400           175            0.091       0
-    1401           176            0.091       7   (not a multiple of 8)
-    1518           190            0.084       2
-
-  eop_empty is non-zero ONLY when FRAME_LEN is not a multiple of 8. That is
-  correct behaviour, not a bug - a frame ending exactly on a segment boundary
-  has zero empty bytes.
-
-  The testbench PRINTS THE EXPECTED frames-per-beat next to the measured one,
-  so a wrong result is obvious without doing the arithmetic yourself.
 
 RUN
   iverilog -g2001 -o lb.out ftile_eth_400g_model.v eth400g_loopback.v tb_loopback.v
@@ -46,84 +17,190 @@ RUN
     vlog ftile_eth_400g_model.v eth400g_loopback.v tb_loopback.v
     vsim -c tb_loopback -do "run -all; quit"
 
-RESULT  -  frame size sweep, STALL_RATE = 0
+================================================================================
+ SETTINGS - all at the top of tb_loopback.v
+================================================================================
+  FRAME_LEN    64      every frame exactly this many bytes, 64..1518
+  GAP_SEGS     1       idle segments between frames (0 = tight packing)
+  STALL_RATE   0       0 = TX never stalls, 40 = stalls often
+  INJECT_ERR   0       1 = flag ~25% of frames bad
+  DROP_ON_ERR  1       1 = remove errored frames, 0 = forward them
 
-  FRAME_LEN  frames/beat (expected)  rate              mismatch  result
-      64        2.000  (2.000)       424.8 (100.0%)    0         PASS
-     128        1.000  (1.000)       424.8 (100.0%)    0         PASS
-     256        0.500  (0.500)       424.8 (100.0%)    0         PASS
-    1400        0.091  (0.091)       424.8 (100.0%)    0         PASS
-    1518        0.084  (0.084)       424.8 (100.0%)    0         PASS
+  A beat is 128 bytes (16 segments x 8 bytes), so:
+      frames per beat = 16 / (ceil(FRAME_LEN/8) + GAP_SEGS)
 
-  With STALL_RATE = 40 the rate drops to ~382 Gbps (90%) and the FIFO
-  overflows by ~1490 beats - both expected, see the note below. Data
-  mismatches stay at 0.
+  The testbench PRINTS THE EXPECTED value next to the measured one, so a
+  wrong result is obvious without doing the arithmetic.
 
---------------------------------------------------------------------------------
- WHAT STAGE 2 ADDS OVER STAGE 1
---------------------------------------------------------------------------------
-  Stage 1 had no datapath, so there was nothing to corrupt. Stage 2 introduces
-  one, which makes three new things testable:
+================================================================================
+ RESULTS
+================================================================================
+  len   gap stall err drop | frames/beat  dropped  ovf   mismatch viol result
+  ----  --- ----- --- ---- | -----------  -------  ----  -------- ---- ------
+    64   1    0    0   0   | 1.778        0        0     0        0    PASS
+    64   1    0    1   1   | 1.778        8747     0     0        0    PASS
+    64   0    0    0   0   | 2.000        0        0     0        0    PASS
+   128   1    0    0   0   | 0.941        0        0     0        0    PASS
+  1518   1    0    0   0   | 0.084        0        0     0        0    PASS
+    64   1   40    0   0   | 1.778        0        1489  0        0    PASS
+    64   1   40    1   1   | 1.778        8747     0     0        0    PASS
 
-    1. DATA INTEGRITY - beat-exact comparison, 0 mismatches in all phases
-    2. TX PAUSE PROTOCOL UNDER LOAD - stage 1 only exercised it on idle beats
-    3. THROUGHPUT - 424.8 of 425 Gbps, 100.0% of interface capacity
+  Interface rate 424.5-424.8 Gbps of 425 (99.9-100.0%) with STALL_RATE = 0.
 
---------------------------------------------------------------------------------
+  8747 frames flagged bad, 8747 dropped - exact. Good frames unaffected:
+  18069 of 20001 beats still pass through with zero mismatches.
+
+================================================================================
+ CHANGES FROM THE FIRST VERSION
+================================================================================
+
+ 1. TX ERROR IS FULLY DECOUPLED FROM RX
+    Previously o_tx_mac_error was driven from i_rx_mac_error. They mean
+    different things:
+      o_rx_mac_error (2b/seg)  CLASSIFIES a received frame
+                               - malformed / size / payload-length
+      i_tx_mac_error (1b/seg)  COMMANDS the MAC to invalidate the frame it
+                               is transmitting
+    Forwarding one to the other means "this arrived corrupt, so transmit it
+    and mark it corrupt" - almost never what an encryptor wants.
+
+    o_tx_mac_error now comes from a dedicated i_tx_error input.
+    o_tx_mac_skip_crc likewise from i_tx_skip_crc.
+
+ 2. ERRORED FRAMES CAN BE DROPPED
+    i_drop_on_error, runtime controlled.
+      0 = forward errored frames untouched
+      1 = remove them from the stream entirely
+
+    Each in-frame segment is tagged with the frame it belongs to. The stream
+    is held in a DROP_DELAY-beat delay line, long enough for a whole frame.
+    The error arrives at EOP; by then the frame's earlier segments are still
+    in the delay line, so their inframe bits are cleared retroactively before
+    the beat reaches the FIFO.
+
+ 3. CDC BUG FIXED - SINGLE CLOCK
+    The previous version exposed i_clk_tx and i_clk_rx separately while
+    computing  level = wr_ptr - rd_ptr  with NO synchronisation. A latent
+    failure: it worked only because the testbench tied both to one clock.
+
+    Collapsed to a single clk. If the clocks ever genuinely differ, the
+    pointers need gray-code CDC - better as an explicit decision than an
+    accident.
+
+ 4. ERROR INJECTION IS FRACTIONAL, NOT ALL-OR-NOTHING
+    Previously every frame was flagged bad, so the drop test could not show
+    that GOOD frames survive. Now ~25% are errored, which is the case that
+    actually matters.
+
+ 5. FRAMES-PER-BEAT USES THE RAW ARRIVAL COUNT
+    o_rx_beats counts beats the DUT ACCEPTED, which is post-drop. Using it
+    as the denominator made dropped beats vanish and inflated the ratio to
+    1.968. The testbench now counts raw RX arrivals separately.
+
+================================================================================
  THE THREE DESIGN DECISIONS
---------------------------------------------------------------------------------
+================================================================================
+
  1. NO PACKET LAYER
-    Stage 1 measured exactly 2.000 frames per beat at 64-byte frame size.
-    UG sec 7.5 confirms a packet may start and the previous one end in the
-    same cycle, and sec 7.4 mandates tight packing.
+    UG sec 7.5: a packet may start and the previous one end in the same
+    cycle. UG sec 7.4 mandates tight packing. At 128 bytes per beat against
+    64-byte minimum frames, two frames per beat is routine - stage 1 measured
+    exactly 2.000.
 
-    So this module never inspects frame boundaries. It buffers and replays
-    1024-bit beats verbatim, carrying inframe / eop_empty / error / skip_crc
-    as opaque sideband. Multi-frame-per-beat is not "handled" - it is
-    structurally impossible to get wrong.
+    The datapath buffers and replays beats verbatim, carrying inframe /
+    eop_empty / error / skip_crc as opaque sideband. Multi-frame-per-beat is
+    not "handled" - it is structurally impossible to get wrong.
 
-    Phase B confirms 40000 frames through 20000 beats with 0 mismatches.
+    (The drop stage is the one exception: it must know frame boundaries. See
+    the assumption below.)
 
  2. TX IS A FIXED-LATENCY PAUSE INTERFACE
     UG sec 7.4: valid asserts whenever ready is asserted "even though there
     is no packet to send", spaced by a fixed 1-7 cycle latency, and the bus
-    must freeze while valid is low.
+    freezes while valid is low.
 
     So o_tx_mac_valid is i_tx_mac_ready DELAYED, never derived from having
     data. An idle beat is inframe=0, NOT valid=0.
 
-    A conventional "out_free = ~valid | ready" handshake is the WRONG
-    protocol. It compiles, passes a naive testbench, and fails on silicon.
+    "out_free = ~valid | ready" is the WRONG protocol. It compiles, passes a
+    naive testbench, and fails on silicon.
 
- 3. REGISTERED FIFO READ
-    An asynchronous read makes Quartus infer MLAB. At 1120 bits x 512 deep
-    that is ~896 MLABs, built from ALMs - it will not close 415 MHz.
-    A registered read infers M20K: ~28 blocks. Cost is one cycle of latency.
+ 3. LATENCY-AGNOSTIC BY CONSTRUCTION
+    Stage 3 will hold a custom algorithm whose latency is not under our
+    control and may change. Nothing may depend on knowing it:
 
---------------------------------------------------------------------------------
- PHASE D IS NOT A FAILURE
---------------------------------------------------------------------------------
-  1490 dropped beats under sustained TX stalling is EXPECTED. RX takes no
-  backpressure (UG sec 7.5) and there is no flow-control path back to the
-  source, so a full FIFO must drop.
+      - initiation interval = 1, no internal stall path
+      - latency is a PARAMETER, never a constant
+      - every register gated by the same enable
+      - the algorithm block has NO backpressure output
 
-  What matters is that mismatch stays at 0: every beat that does get through
-  is bit-exact. Drops without corruption.
+    Consequence: throughput is independent of frame size. Latency costs
+    buffering and delay, never throughput.
 
-  The production answer is PAUSE/PFC flow control (UG sec 4.2.3), which stops
-  the far end rather than dropping. That belongs in a later stage.
+    Why this matters at 400G specifically: hiding crypto latency in idle
+    cycles works at 100G only because a 512-bit datapath at 390.625 MHz
+    gives 200 Gb/s for 100 Gb/s of traffic - 50% idle. At 400G the interface
+    runs 425 Gb/s for 400 Gb/s of payload: about 6% idle. Hiding even 17
+    cycles that way would need a ~35 KB frame. Not a tuning problem - it is
+    arithmetically impossible at any legal frame size.
 
---------------------------------------------------------------------------------
+================================================================================
+ >>> ASSUMPTION - VERIFY BEFORE HARDWARE <<<
+================================================================================
+ The DROP feature needs frame boundaries, and resolves them from inframe
+ 1->0 transitions.
+
+ UG sec 7.4 mandates tight packing with no idle segments, under which inframe
+ would stay high across a frame boundary and leave no transition to find. But
+ that mandate is about what YOU DRIVE ON TX for maximum throughput.
+
+ On RX the IP delivers what arrived on the wire, and Ethernet always carries
+ an inter-packet gap (minimum 8 octets = 1 segment), so RX should always show
+ at least one idle segment between frames.
+
+ THIS IS AN INFERENCE FROM THE IPG REQUIREMENT, NOT A QUOTATION.
+ Confirm against the generated design example.
+
+ Practical consequence: run with GAP_SEGS >= 1 when drop is enabled. If RX
+ really does pack with zero gap, only DROP is affected - the rest of the
+ datapath is frame-agnostic.
+
+================================================================================
+ SIZING NOTES
+================================================================================
+ DROP_DELAY must exceed the longest frame's span in beats:
+     beats per frame = ceil( (ceil(LEN/8) + GAP_SEGS) / 16 )
+       1518 B -> 12 beats  -> DROP_DELAY 16 is enough
+       9000 B -> 71 beats  -> JUMBO NEEDS DROP_DELAY 80
+ Cost ~1184 flip-flops per stage at this datapath width.
+
+ FIFO uses a REGISTERED read with an explicit M20K ramstyle. An asynchronous
+ read infers MLAB: ~896 MLABs at 1120 bits x 512 deep, built from ALMs, and
+ it will not close 415 MHz. Registered read infers ~28 M20Ks.
+
+================================================================================
+ PHASE WITH STALLS IS NOT A FAILURE
+================================================================================
+ 1489 dropped beats under sustained TX stalling is EXPECTED. RX takes no
+ backpressure (UG sec 7.5) and there is no flow-control path back to the
+ source, so a full FIFO must drop.
+
+ What matters is mismatch = 0 alongside it: every beat that gets through is
+ bit-exact. Drops without corruption.
+
+ The production answer is PAUSE/PFC flow control (UG sec 4.2.3).
+
+================================================================================
  NOT PROVEN BY STAGE 2
---------------------------------------------------------------------------------
-  Reset and status sequencing (12-step, o_tx_lanes_stable / o_rx_pcs_ready)
-  Any processing stage - that is STAGE 3 (pipe_proc)
-  PMA, PCS, RS-FEC (KP4), lane distribution, AM lock, AN/LT, link training
-  PAUSE/PFC flow control, skip_crc semantics, CSR/statistics, PTP/TOD
+================================================================================
+ Reset and status sequencing (12-step, o_tx_lanes_stable / o_rx_pcs_ready)
+ Any processing stage - that is STAGE 3
+ PMA, PCS, RS-FEC (KP4), lane distribution, AM lock, AN/LT, link training
+ PAUSE/PFC flow control, skip_crc semantics, CSR/statistics, PTP/TOD
 
---------------------------------------------------------------------------------
+================================================================================
  NEXT
---------------------------------------------------------------------------------
-  STAGE 3  add pipe_proc - the pipelined processing stage, II=1, frozen by
-           the same tx_en. Placeholder for AES-GCM / SecY.
-  STAGE 4  top-level wrapper for synthesis and fitting on Agilex 7.
+================================================================================
+ STAGE 3  pipe_proc - pipelined processing, II=1, latency a parameter,
+          frozen by the same enable. Placeholder for the custom algorithm.
+ STAGE 4  top wrapper for synthesis and fitting on Agilex 7.
